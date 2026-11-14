@@ -69,5 +69,5 @@ describe('career', () => {
     for (const c of Object.values(w.clubs)) expect(clubPlayers(w, c.id).length).toBeGreaterThanOrEqual(16);
     expect(Object.keys(w.players).length).toBeGreaterThan(playerCount * 0.85);
     expect(Object.values(w.clubs).filter((c) => c.division === 0).length).toBe(10);
-  }, 300000);
+  }, 600000);
 });

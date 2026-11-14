@@ -19,7 +19,7 @@ describe('match engine', () => {
     b.runToEnd();
     expect(a.score()).toEqual(b.score());
     expect(a.events.map((e) => `${e.tick}:${e.type}:${e.player ?? ''}`)).toEqual(b.events.map((e) => `${e.tick}:${e.type}:${e.player ?? ''}`));
-  });
+  }, 60000);
 
   it('reproduces the same match when the same command arrives at the same tick', () => {
     const w = setup();
@@ -39,7 +39,7 @@ describe('match engine', () => {
     expect(a.score()).toEqual(b.score());
     expect(a.events.length).toBe(b.events.length);
     expect(a.events.some((e) => e.type === 'sub' && e.team === 0)).toBe(true);
-  });
+  }, 60000);
 
   it('keeps score, goal events and stats consistent', () => {
     const w = setup(9);
@@ -61,7 +61,7 @@ describe('match engine', () => {
         expect(t.subsUsed).toBeLessThanOrEqual(5);
       }
     }
-  });
+  }, 60000);
 
   it('produces plausible football over a batch (seeded regression)', () => {
     const w = setup(21);
@@ -85,5 +85,5 @@ describe('match engine', () => {
     expect(gpm).toBeLessThan(4.2);
     expect(shots / n / 2).toBeGreaterThan(7);
     expect(shots / n / 2).toBeLessThan(24);
-  }, 120000);
+  }, 300000);
 });

@@ -20,7 +20,8 @@ import {
   type World,
 } from '../../domain/types';
 import { Rng, hashString } from '../../shared/rng';
-import { MatchEngine } from '../match/engine';
+import { MatchEngine, type MatchTeamInput } from '../match/engine';
+import { outcomeOf, type MatchOutcome } from '../match/outcome';
 import { resolveKits, teamInput } from '../match/setup';
 
 // ------------------------------------------------------------------ helpers
@@ -88,6 +89,12 @@ export interface PlayedMatch {
 
 /** Build an engine for a fixture. The user's side is never auto-managed except for injuries. */
 export function createMatch(world: World, f: Fixture, record: boolean): MatchEngine {
+  const { home, away, seed } = matchInputs(world, f);
+  return new MatchEngine(home, away, seed, { record });
+}
+
+/** Team inputs and seed for a fixture (picks AI line-ups). */
+export function matchInputs(world: World, f: Fixture): { home: MatchTeamInput; away: MatchTeamInput; seed: number } {
   const home = world.clubs[f.home];
   const away = world.clubs[f.away];
   for (const c of [home, away]) {
@@ -98,12 +105,13 @@ export function createMatch(world: World, f: Fixture, record: boolean): MatchEng
   const hi = teamInput(world, home, home.id !== world.manager.clubId);
   const ai = teamInput(world, away, away.id !== world.manager.clubId);
   ai.kit = resolveKits(home.kit, away);
-  return new MatchEngine(hi, ai, matchSeed(world, f), { record });
+  return { home: hi, away: ai, seed: matchSeed(world, f) };
 }
 
-export function applyResult(world: World, f: Fixture, m: MatchEngine) {
-  const [hg, ag] = m.score();
-  const ratings = m.ratings();
+export function applyResult(world: World, f: Fixture, src: MatchEngine | MatchOutcome) {
+  const m: MatchOutcome = src instanceof MatchEngine ? outcomeOf(src) : src;
+  const [hg, ag] = m.score;
+  const ratings = m.ratings;
   const home = world.clubs[f.home];
   const away = world.clubs[f.away];
   const rng = new Rng(matchSeed(world, f) ^ 0xabc);
@@ -130,13 +138,13 @@ export function applyResult(world: World, f: Fixture, m: MatchEngine) {
   let best = -1;
   for (const [id, r] of Object.entries(ratings)) if (r > best) (best = r), (motm = id);
 
-  f.result = { homeGoals: hg, awayGoals: ag, scorers, attendance, stats: m.matchStats(), ratings, motm };
+  f.result = { homeGoals: hg, awayGoals: ag, scorers, attendance, stats: m.stats, ratings, motm };
 
   // Player consequences
   for (const team of [0, 1] as const) {
     const clubId = team === 0 ? f.home : f.away;
     const conceded = team === 0 ? ag : hg;
-    for (const mp of m.teams[team].players) {
+    for (const mp of m.players[team]) {
       const p = world.players[mp.id];
       if (!p) continue;
       if (mp.used) {
@@ -177,13 +185,13 @@ export function applyResult(world: World, f: Fixture, m: MatchEngine) {
     }
     // Suspensions served this match by those who didn't play.
     for (const p of clubPlayers(world, clubId)) {
-      if (!m.teams[team].players.some((q) => q.id === p.id) && p.suspended > 0 && !justSuspended(m, p.id)) p.suspended--;
+      if (!m.players[team].some((q) => q.id === p.id) && p.suspended > 0 && !justSuspended(m, p.id)) p.suspended--;
     }
     // Morale
     const won = team === 0 ? hg > ag : ag > hg;
     const lost = team === 0 ? hg < ag : ag < hg;
     for (const p of clubPlayers(world, clubId)) {
-      const played = m.teams[team].players.some((q) => q.id === p.id && q.used);
+      const played = m.players[team].some((q) => q.id === p.id && q.used);
       const delta = (won ? 4 : lost ? -4 : 0) + (played ? 1 : -1);
       p.morale = Math.max(5, Math.min(100, p.morale + delta));
     }
@@ -193,7 +201,7 @@ export function applyResult(world: World, f: Fixture, m: MatchEngine) {
   void away;
 }
 
-function justSuspended(m: MatchEngine, id: string) {
+function justSuspended(m: MatchOutcome, id: string) {
   return m.events.some((e) => e.type === 'red' && e.player === id);
 }
 
@@ -210,14 +218,61 @@ export function userFixtureThisWeek(world: World): Fixture | undefined {
 /** Simulate every unplayed fixture of the current week except the excluded one. */
 export async function simulateOtherMatches(world: World, exceptId: string | null, onProgress?: (done: number, total: number, fixture: Fixture) => void, pauseMs = 0) {
   const list = weekFixtures(world).filter((f) => !f.result && f.id !== exceptId);
+  if (!list.length) return;
+  // Inputs are fixed before any match runs, so threads can't affect each other.
+  const jobs = list.map((f) => ({ f, ...matchInputs(world, f) }));
   let done = 0;
-  for (const f of list) {
-    const m = createMatch(world, f, false);
-    m.runToEnd();
-    applyResult(world, f, m);
+  const finish = async (f: Fixture, o: MatchOutcome) => {
+    applyResult(world, f, o);
     done++;
     onProgress?.(done, list.length, f);
-    await new Promise((r) => setTimeout(r, pauseMs));
+    if (pauseMs) await new Promise((r) => setTimeout(r, pauseMs));
+  };
+  const outcomes = typeof Worker !== 'undefined' ? await runInWorkers(jobs) : null;
+  if (outcomes) {
+    // Apply in fixture order so the career state never depends on thread timing.
+    for (const j of jobs) await finish(j.f, outcomes.get(j.f.id)!);
+    return;
+  }
+  for (const j of jobs) {
+    const m = new MatchEngine(j.home, j.away, j.seed);
+    m.runToEnd();
+    await finish(j.f, outcomeOf(m));
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
+async function runInWorkers(jobs: { f: Fixture; home: MatchTeamInput; away: MatchTeamInput; seed: number }[]): Promise<Map<string, MatchOutcome> | null> {
+  try {
+    const n = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1, jobs.length));
+    const workers = Array.from({ length: n }, () => new Worker(new URL('../match/simWorker.ts', import.meta.url), { type: 'module' }));
+    const out = new Map<string, MatchOutcome>();
+    let next = 0;
+    await Promise.all(
+      workers.map(
+        (w) =>
+          new Promise<void>((resolve, reject) => {
+            const feed = () => {
+              if (next >= jobs.length) {
+                w.terminate();
+                resolve();
+                return;
+              }
+              const j = jobs[next++];
+              w.postMessage({ id: j.f.id, home: j.home, away: j.away, seed: j.seed });
+            };
+            w.onmessage = (e: MessageEvent<{ id: string; outcome: MatchOutcome }>) => {
+              out.set(e.data.id, e.data.outcome);
+              feed();
+            };
+            w.onerror = (e) => reject(e);
+            feed();
+          }),
+      ),
+    );
+    return out;
+  } catch {
+    return null;
   }
 }
 

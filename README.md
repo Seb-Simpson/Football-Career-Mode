@@ -615,9 +615,10 @@ npm test           # unit, engine and full-season tests (~2 minutes)
 npm run build      # typecheck and production build into dist/
 npm run preview    # serve the production build locally
 npm run calibrate  # 90-match engine statistics batch (~40 seconds)
+npm run build:site # build and copy index.html + assets/ to the repo root for GitHub Pages
 ```
 
-The build is static (`base: './'`), so `dist/` can be hosted on any static host. No deployment exists yet.
+The game is published with GitHub Pages ("Deploy from a branch", `main`, root): https://seb-simpson.github.io/Football-Career-Mode/. The root `index.html` and `assets/` are build output. Don't edit them by hand. The source page is `web/index.html`, and the `Build site` workflow rebuilds and commits the root files on every push to `main`.
 
 Source layout:
 
@@ -631,6 +632,7 @@ src/
   persistence/     # Save, load, validation, export/import
   ui/              # React screens, components, theme (club colours drive the chrome)
   data/            # Fictional name and club definitions
+web/index.html     # Source HTML entry (Vite root)
   shared/          # Seeded RNG
 tests/             # Domain, engine and career tests
 scripts/           # Engine calibration batch

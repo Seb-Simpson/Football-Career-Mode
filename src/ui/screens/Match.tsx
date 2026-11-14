@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { FORMATION_LIST } from '../../domain/formations';
 import type { Formation, Tactics as T } from '../../domain/types';
 import { MAX_SUBS } from '../../domain/types';
-import { MatchAudio } from '../../presentation/audio';
+import { sound as audio } from '../../presentation/sound';
 import { commentary, isHighlight } from '../../presentation/commentary';
 import { PitchRenderer } from '../../presentation/renderer';
 import { TifoScene } from '../../presentation/tifo';
@@ -40,7 +40,8 @@ export function MatchScreen() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<PitchRenderer | null>(null);
-  const audioRef = useRef<MatchAudio>(new MatchAudio());
+  const lastBall = useRef<[number, number, number] | null>(null);
+  const nextChant = useRef(performance.now() + 9000);
   const display = useRef(0);
   const processed = useRef(0);
   const searchIdx = useRef(0);
@@ -98,33 +99,23 @@ export function MatchScreen() {
     if (rendererRef.current) rendererRef.current.mode = view;
   }, [view]);
 
-  // Audio
+  // Stadium sound: crowd bed for the whole match, music off.
   useEffect(() => {
-    const a = audioRef.current;
-    a.enabled = sound;
-    if (sound) a.start();
-    a.setEnabled(sound);
-  }, [sound]);
-  useEffect(() => () => audioRef.current.stop(), []);
-
-  // Pause when hidden
-  useEffect(() => {
-    const onVis = () => {
-      if (document.hidden) setPaused(true);
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
+    audio.playMusic(null);
+    audio.startCrowd(0.7);
+    return () => audio.stopCrowd();
   }, []);
-
   useEffect(() => {
-    audioRef.current.pause(paused);
+    audio.setPrefs(world.settings.music !== false, sound);
+  }, [sound, world.settings.music]);
+  useEffect(() => {
+    audio.setIntensity(paused ? 0.1 : 0.6);
   }, [paused]);
 
   const handleEvent = useCallback(
     (ev: MatchEvent) => {
       const text = commentary(ev, m);
       if (text) setFeed((f) => [{ ev, text }, ...f].slice(0, 120));
-      const a = audioRef.current;
       const r = rendererRef.current;
       const who = (id?: string) => (id ? m.playerById(id)?.name ?? '' : '');
       const showNote = (kind: 'yellow' | 'red' | 'sub' | 'pen' | 'injury', title: string, sub: string) => {
@@ -145,11 +136,16 @@ export function MatchScreen() {
         const scorer = ev.player ? m.playerById(ev.player) : undefined;
         setBanner({ team: ev.team as 0 | 1, text: 'GOAL', sub: `${scorer?.name ?? ''} ${clockLabel(ev.clock, ev.half)}` });
         setTimeout(() => setBanner(null), cutscenes ? 2400 : 3400);
-        a.swell(ev.team === 0 ? 0.55 : 0.3, 4);
-      } else if (ev.type === 'shot' && (ev.xg ?? 0) > 0.15) a.swell(0.18, 1.5);
-      else if (ev.type === 'save' || ev.type === 'post') a.swell(0.22, 1.5);
-      if (ev.type === 'foul' || ev.type === 'offside' || ev.type === 'kickoff') a.whistle(false);
-      if (ev.type === 'halftime' || ev.type === 'fulltime') a.whistle(true);
+        audio.goal(ev.team === 0);
+      } else if (ev.type === 'save' || ev.type === 'post' || (ev.type === 'miss' && (ev.xg ?? 0) > 0.12)) {
+        // The shooting team's fans groan; a save by the home keeper gets a cheer instead.
+        const shooterTeam = ev.type === 'save' ? (ev.team === 0 ? 1 : 0) : ev.team;
+        audio.ooh(shooterTeam === 0);
+      }
+      if (ev.type === 'shot') audio.kick(1.4);
+      if (ev.type === 'foul' || ev.type === 'offside' || ev.type === 'kickoff' || ev.type === 'penalty') audio.whistle(false);
+      if (ev.type === 'halftime' || ev.type === 'fulltime') audio.whistle(true);
+      if (ev.type === 'fulltime') setTimeout(() => audio.applause(), 1500);
     },
     [m, cutscenes],
   );
@@ -253,6 +249,27 @@ export function MatchScreen() {
         r.celebrateTeam = celebrating ? g!.team : -1;
         r.zoom = replayRef.current ? 1.3 : celebrating ? 1.28 : fa.ball[0] < 22 || fa.ball[0] > 83 ? 1.12 : 1;
         r.render(fa, fb, display.current - i, dt);
+        // Ball strikes: a sudden change in ball velocity between frames.
+        const lb = lastBall.current;
+        if (lb && !replayRef.current && !pausedRef.current) {
+          const vx = fb ? fb.ball[0] - fa.ball[0] : 0;
+          const vy = fb ? fb.ball[1] - fa.ball[1] : 0;
+          const dv = Math.hypot(vx - lb[0], vy - lb[1]);
+          if (dv > 1.3 && i !== lb[2] && speedRef.current <= 24) audio.kick(Math.min(1.2, dv / 3));
+          lastBall.current = [vx, vy, i];
+        } else if (fb) lastBall.current = [fb.ball[0] - fa.ball[0], fb.ball[1] - fa.ball[1], i];
+      }
+      if (fa && !replayRef.current) {
+        // Crowd reacts to danger: louder as the ball nears either goal, more for home attacks.
+        const toHomeGoal = fa.half === 1 ? fa.ball[0] : 105 - fa.ball[0];
+        const toAwayGoal = 105 - toHomeGoal;
+        const danger = Math.max(0, 1 - Math.min(toHomeGoal, toAwayGoal) / 32);
+        const homeAttack = toAwayGoal < toHomeGoal;
+        if (!pausedRef.current) audio.setIntensity(0.5 + danger * (homeAttack ? 0.75 : 0.45));
+        if (now > nextChant.current && !pausedRef.current) {
+          nextChant.current = now + 16000 + Math.random() * 18000;
+          audio.chantFor(Math.random() < 0.68);
+        }
       }
 
       hudT += dt;
@@ -331,8 +348,8 @@ export function MatchScreen() {
             title={world.clubs[fixture.home].stadium}
             sub={`${teamName(0)} v ${teamName(1)}`}
             onStart={() => {
-              audioRef.current.swell(0.3, 5);
-              audioRef.current.claps(2);
+              audio.setIntensity(1);
+              audio.chantFor(true);
             }}
             onDone={() => setIntro('walkout')}
           />

@@ -514,7 +514,7 @@ export class MatchEngine {
     this.setPiece = null;
     this.applySubs();
     if (type === 'corner' || (type === 'freekick' && this.toU(team, this.bx) > 0.72 && !this.directFreeKick(this.restart))) {
-      this.restart.timer = 5;
+      this.restart.timer = 6.5;
       this.planSetPiece(this.restart);
     }
   }
@@ -965,7 +965,7 @@ export class MatchEngine {
             tx = role.mark.x + Math.sign(ownGx - role.mark.x) * 0.9;
             ty = role.mark.y + (PITCH_W / 2 - role.mark.y) * 0.08;
           }
-          const urg = sp!.delivered ? 1 : dist(p.x, p.y, tx, ty) > 3 ? 0.8 : 0.4;
+          const urg = sp!.delivered ? 1 : dist(p.x, p.y, tx, ty) > 3 ? 0.95 : 0.4;
           this.moveToward(p, tx, ty, urg);
           p.tx = tx;
           p.ty = ty;

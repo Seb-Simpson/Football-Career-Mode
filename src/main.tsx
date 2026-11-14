@@ -8,6 +8,9 @@ import '@fontsource-variable/archivo/standard';
 import './ui/styles.css';
 import { App } from './ui/App';
 import { StoreProvider } from './ui/store';
+import { sound } from './presentation/sound';
+
+sound.install();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

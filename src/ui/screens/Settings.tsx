@@ -135,8 +135,12 @@ export function Settings() {
               Cutscenes, walkouts and automatic goal replays
             </label>
             <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontWeight: 600 }}>
+              <input type="checkbox" checked={s.music !== false} onChange={(e) => store.mutate((w) => (w.settings.music = e.target.checked), true)} style={{ width: 20, height: 20 }} />
+              Music
+            </label>
+            <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontWeight: 600 }}>
               <input type="checkbox" checked={s.sound} onChange={(e) => store.mutate((w) => (w.settings.sound = e.target.checked), true)} style={{ width: 20, height: 20 }} />
-              Sound: crowd, whistle and interface
+Sound effects: crowd, chants, whistle and interface
             </label>
           </div>
         </Panel>

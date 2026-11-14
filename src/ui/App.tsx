@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { uiSound } from '../presentation/uiSound';
+import { sound } from '../presentation/sound';
 import { CutsceneLayer } from './cutscenes/Cutscenes';
 import { LEAGUE_NAMES, MATCHWEEKS } from '../domain/types';
 import { nextFixture } from '../domain/fixtures';
@@ -41,8 +42,15 @@ export function App() {
   const { world } = store;
 
   useEffect(() => {
-    uiSound.setEnabled(world ? world.settings.sound : true);
+    sound.setPrefs(world ? world.settings.music !== false : true, world ? world.settings.sound : true);
   }, [world, store.version]);
+
+  // Music: the anthem for the title, big moments and matchday; a groove for managing.
+  useEffect(() => {
+    if (store.screen === 'match' && world) return; // the match screen runs the crowd instead
+    const anthem = !world || !!store.cutscene || store.screen === 'prematch' || store.screen === 'season';
+    sound.playMusic(anthem ? 'musicFloodlights' : 'musicDressing');
+  }, [world, store.screen, store.cutscene]);
 
   useEffect(() => {
     const onDown = (e: PointerEvent) => {

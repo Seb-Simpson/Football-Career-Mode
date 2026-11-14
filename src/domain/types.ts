@@ -194,6 +194,8 @@ export interface Settings {
   sound: boolean;
   /** Cutscenes, walkouts and automatic replays. Undefined means on. */
   cutscenes?: boolean;
+  /** Menu and cutscene music. Undefined means on. */
+  music?: boolean;
 }
 
 export interface World {

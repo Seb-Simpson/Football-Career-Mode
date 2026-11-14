@@ -5,6 +5,9 @@ import { MAX_SUBS } from '../../domain/types';
 import { MatchAudio } from '../../presentation/audio';
 import { commentary, isHighlight } from '../../presentation/commentary';
 import { PitchRenderer } from '../../presentation/renderer';
+import { TifoScene } from '../../presentation/tifo';
+import { WALKOUT_SECONDS, walkoutFrame } from '../../presentation/walkout';
+import type { Kit } from '../../domain/types';
 import { DT, clockDigits, clockLabel, type MatchEngine, type MatchEvent } from '../../simulation/match/engine';
 import { applyResult, createMatch, userClub } from '../../simulation/world/season';
 import { Icon } from '../components/Icons';
@@ -42,8 +45,16 @@ export function MatchScreen() {
   const processed = useRef(0);
   const searchIdx = useRef(0);
   const windowRef = useRef<{ start: number; end: number } | null>(null);
-  const replayRef = useRef<{ from: number; to: number; ret: number } | null>(null);
+  const replayRef = useRef<{ from: number; to: number; ret: number; auto?: boolean } | null>(null);
   const appliedRef = useRef(false);
+  const cutscenes = world.settings.cutscenes !== false && !world.settings.reducedMotion;
+  const [intro, setIntro] = useState<'tifo' | 'walkout' | null>(cutscenes ? 'tifo' : null);
+  const introRef = useRef(intro);
+  introRef.current = intro;
+  const introT = useRef(0);
+  const goalRef = useRef<{ tick: number; team: 0 | 1 } | null>(null);
+  const autoReplay = useRef<{ from: number; to: number; due: number } | null>(null);
+  const [note, setNote] = useState<{ id: number; kind: 'yellow' | 'red' | 'sub' | 'pen' | 'injury'; team: 0 | 1; title: string; sub: string } | null>(null);
 
   const [paused, setPaused] = useState(false);
   const [speed, setSpeed] = useState(world.settings.matchSpeed);
@@ -114,17 +125,33 @@ export function MatchScreen() {
       const text = commentary(ev, m);
       if (text) setFeed((f) => [{ ev, text }, ...f].slice(0, 120));
       const a = audioRef.current;
+      const r = rendererRef.current;
+      const who = (id?: string) => (id ? m.playerById(id)?.name ?? '' : '');
+      const showNote = (kind: 'yellow' | 'red' | 'sub' | 'pen' | 'injury', title: string, sub: string) => {
+        const id = ev.seq;
+        setNote({ id, kind, team: ev.team as 0 | 1, title, sub });
+        setTimeout(() => setNote((n) => (n && n.id === id ? null : n)), 3600);
+      };
+      if (ev.type === 'yellow') showNote('yellow', who(ev.player), 'Yellow card');
+      else if (ev.type === 'red') showNote('red', who(ev.player), ev.detail === 'Second yellow' ? 'Second yellow: sent off' : 'Red card');
+      else if (ev.type === 'sub') showNote('sub', who(ev.player), `On for ${who(ev.other)}`);
+      else if (ev.type === 'penalty') showNote('pen', 'Penalty', m.teams[ev.team as 0 | 1].input.name);
+      else if (ev.type === 'injury') showNote('injury', who(ev.player), 'Down injured');
+      if (r && (ev.type === 'save' || ev.type === 'post')) r.excite = Math.max(r.excite, 0.5);
       if (ev.type === 'goal') {
+        goalRef.current = { tick: ev.tick, team: ev.team as 0 | 1 };
+        if (r) r.excite = 1;
+        if (cutscenes) autoReplay.current = { from: Math.max(0, ev.tick - 22), to: ev.tick + 6, due: performance.now() + 2500 };
         const scorer = ev.player ? m.playerById(ev.player) : undefined;
         setBanner({ team: ev.team as 0 | 1, text: 'GOAL', sub: `${scorer?.name ?? ''} ${clockLabel(ev.clock, ev.half)}` });
-        setTimeout(() => setBanner(null), 3400);
+        setTimeout(() => setBanner(null), cutscenes ? 2400 : 3400);
         a.swell(ev.team === 0 ? 0.55 : 0.3, 4);
       } else if (ev.type === 'shot' && (ev.xg ?? 0) > 0.15) a.swell(0.18, 1.5);
       else if (ev.type === 'save' || ev.type === 'post') a.swell(0.22, 1.5);
       if (ev.type === 'foul' || ev.type === 'offside' || ev.type === 'kickoff') a.whistle(false);
       if (ev.type === 'halftime' || ev.type === 'fulltime') a.whistle(true);
     },
-    [m],
+    [m, cutscenes],
   );
 
   // Main loop
@@ -136,17 +163,34 @@ export function MatchScreen() {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       const r = rendererRef.current;
+      // Pre-match presentation: the tifo has its own canvas; the walkout uses this one.
+      if (introRef.current) {
+        if (introRef.current === 'walkout' && r) {
+          introT.current += dt;
+          r.zoom = 1.32;
+          r.excite = Math.max(r.excite, 0.35);
+          r.render(walkoutFrame(introT.current), walkoutFrame(introT.current + 0.2), 0, dt);
+          if (introT.current > WALKOUT_SECONDS) {
+            r.zoom = 1;
+            setIntro(null);
+          }
+        }
+        raf = requestAnimationFrame(loop);
+        return;
+      }
       let skipping = false;
       const rp = replayRef.current;
       if (rp) {
-        display.current += (dt * 1.0) / DT;
+        display.current += (dt * (rp.auto ? 0.75 : 1.0)) / DT;
         if (display.current >= rp.to) {
           display.current = rp.ret;
           replayRef.current = null;
         }
       } else if (!pausedRef.current) {
         if (modeRef.current === 'full') {
-          const target = display.current + (dt * speedRef.current) / DT;
+          const g0 = goalRef.current;
+          const inCelebration = cutscenes && !!g0 && display.current >= g0.tick && display.current < g0.tick + 42;
+          const target = display.current + (dt * (inCelebration ? Math.min(speedRef.current, 3.4) : speedRef.current)) / DT;
           let budget = 4000;
           while (m.frameCount - 1 < Math.ceil(target) + 1 && !m.finished && budget-- > 0) m.step();
           display.current = Math.min(target, m.frameCount - 1);
@@ -190,10 +234,26 @@ export function MatchScreen() {
         while (processed.current < m.events.length && m.events[processed.current].tick <= display.current) handleEvent(m.events[processed.current++]);
       }
 
+      // Automatic goal replay once the celebration is under way.
+      const ar = autoReplay.current;
+      if (ar && !replayRef.current && now >= ar.due) {
+        autoReplay.current = null;
+        if (!pausedRef.current) {
+          replayRef.current = { from: ar.from, to: ar.to, ret: display.current, auto: true };
+          display.current = ar.from;
+        }
+      }
+
       const i = Math.floor(display.current);
       const fa = m.frame(Math.min(i, m.frameCount - 1));
       const fb = m.frame(Math.min(i + 1, m.frameCount - 1));
-      if (r && fa) r.render(fa, fb, display.current - i, dt);
+      if (r && fa) {
+        const g = goalRef.current;
+        const celebrating = !!g && display.current >= g.tick && display.current < g.tick + 42;
+        r.celebrateTeam = celebrating ? g!.team : -1;
+        r.zoom = replayRef.current ? 1.3 : celebrating ? 1.28 : fa.ball[0] < 22 || fa.ball[0] > 83 ? 1.12 : 1;
+        r.render(fa, fb, display.current - i, dt);
+      }
 
       hudT += dt;
       if (hudT > 0.1 && fa) {
@@ -211,6 +271,8 @@ export function MatchScreen() {
   }, [m, handleEvent]);
 
   const finishNow = () => {
+    autoReplay.current = null;
+    replayRef.current = null;
     m.runToEnd();
     display.current = m.frameCount - 1;
     windowRef.current = null;
@@ -247,7 +309,68 @@ export function MatchScreen() {
           </div>
           {hud.clock > (hud.half === 1 ? 2700 : 5400) && <div className="extra">+{Math.floor((hud.clock - (hud.half === 1 ? 2700 : 5400)) / 60) + 1}</div>}
         </div>
-        {hud.replay && <div className="stage-tag">REPLAY</div>}
+        {hud.replay && !intro && (
+          <>
+            <div className="stage-tag">REPLAY</div>
+            <button
+              className="stage-skip"
+              onClick={() => {
+                const rp = replayRef.current;
+                if (rp) display.current = rp.ret;
+                replayRef.current = null;
+              }}
+            >
+              Skip replay
+            </button>
+          </>
+        )}
+        {intro === 'tifo' && (
+          <TifoIntro
+            kit={world.clubs[fixture.home].kit}
+            short={world.clubs[fixture.home].short}
+            title={world.clubs[fixture.home].stadium}
+            sub={`${teamName(0)} v ${teamName(1)}`}
+            onStart={() => {
+              audioRef.current.swell(0.3, 5);
+              audioRef.current.claps(2);
+            }}
+            onDone={() => setIntro('walkout')}
+          />
+        )}
+        {intro === 'walkout' && (
+          <div className="lineup-third">
+            {([0, 1] as const).map((t) => (
+              <div key={t} className="lt-team" style={{ '--k': accent(kits[t]), '--kf': contrastText(accent(kits[t])) } as CSSProperties}>
+                <header>
+                  <b>{teamName(t)}</b>
+                  <span>{m.teams[t].tactics.formation}</span>
+                </header>
+                <ol>
+                  {m.teams[t].players.slice(0, 11).map((p) => (
+                    <li key={p.id}>
+                      <i>{p.number}</i>
+                      {p.name}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ))}
+          </div>
+        )}
+        {intro && (
+          <button className="stage-skip" onClick={() => (rendererRef.current && (rendererRef.current.zoom = 1), setIntro(null))}>
+            Skip intro
+          </button>
+        )}
+        {note && !intro && (
+          <div key={note.id} className={`stage-note ${note.kind}`} style={{ '--k': accent(kits[note.team]) } as CSSProperties} role="status">
+            <i className="mark" aria-hidden="true" />
+            <span>
+              <b>{note.title}</b>
+              <small>{note.sub}</small>
+            </span>
+          </div>
+        )}
         {hud.skipping && !hud.replay && <div className="stage-tag skip">Skipping to the next highlight…</div>}
         {banner && (
           <div className="goal-banner" role="status">
@@ -502,6 +625,52 @@ function TouchlineTactics({ m, team, onApplied }: { m: MatchEngine; team: 0 | 1;
         Shout instructions
       </button>
       <p style={{ color: '#9fb3a8', fontSize: 12.5, marginTop: 8 }}>Applies straight away. Players' positions shift over the next few seconds.</p>
+    </div>
+  );
+}
+
+function TifoIntro({ kit, short, title, sub, onStart, onDone }: { kit: Kit; short: string; title: string; sub: string; onStart: () => void; onDone: () => void }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const done = useRef(onDone);
+  done.current = onDone;
+  useEffect(() => {
+    const scene = new TifoScene(ref.current!, kit, short);
+    const ro = new ResizeObserver(() => scene.resize());
+    ro.observe(ref.current!);
+    onStart();
+    let raf = 0;
+    let t = 0;
+    let last = performance.now();
+    let finished = false;
+    const loop = (now: number) => {
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      t += dt;
+      scene.render(t, dt);
+      if (t > 6.2 && !finished) {
+        finished = true;
+        done.current();
+        return;
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div className="tifo">
+      <canvas ref={ref} aria-label={`The home end unveils a display for ${title}`} role="img" />
+      <div className="lower-third" style={{ '--k': accent(kit), '--kf': contrastText(accent(kit)) } as CSSProperties}>
+        <i className="lt-band" />
+        <div>
+          <b>{title}</b>
+          <span>{sub}</span>
+        </div>
+      </div>
     </div>
   );
 }

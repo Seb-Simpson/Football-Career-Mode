@@ -3,6 +3,11 @@ import type { World } from '../domain/types';
 import { validateLineup } from '../domain/lineup';
 import { saveWorld } from '../persistence/save';
 import { endSeason, finishWeek, simulateOtherMatches, userClub, userFixtureThisWeek, type SeasonSummary } from '../simulation/world/season';
+import { LEAGUE_NAMES } from '../domain/types';
+import { uiSound } from '../presentation/uiSound';
+import type { Cutscene } from './cutscenes/Cutscenes';
+
+const BIG_SCREENS: Screen[] = ['prematch', 'match', 'report', 'season'];
 
 export type Screen =
   | 'home'
@@ -30,7 +35,10 @@ interface Store {
   screen: Screen;
   params: Record<string, string>;
   version: number;
-  busy: { label: string; progress: number } | null;
+  busy: { label: string; progress: number; results: string[] } | null;
+  cutscene: Cutscene | null;
+  wipe: number;
+  playCutscene: (c: Cutscene | null) => void;
   toasts: Toast[];
   playerId: string | null;
   seasonSummary: SeasonSummary | null;
@@ -67,6 +75,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [seasonSummary, setSeasonSummary] = useState<SeasonSummary | null>(null);
+  const [cutscene, setCutscene] = useState<Cutscene | null>(null);
+  const [wipe, setWipe] = useState(0);
   const toastId = useRef(0);
   const advancing = useRef(false);
 
@@ -98,12 +108,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [world, slot, toast],
   );
 
-  const go = useCallback((s: Screen, p: Record<string, string> = {}) => {
-    setScreen(s);
-    setParams(p);
-    setPlayerId(null);
-    window.scrollTo({ top: 0 });
-  }, []);
+  const go = useCallback(
+    (s: Screen, p: Record<string, string> = {}) => {
+      const apply = () => {
+        setScreen(s);
+        setParams(p);
+        setPlayerId(null);
+        window.scrollTo({ top: 0 });
+      };
+      // Big moments get a club-colour wipe; the screen swaps while it covers the view.
+      if (BIG_SCREENS.includes(s) && world && !world.settings.reducedMotion) {
+        setWipe((w) => w + 1);
+        uiSound.whoosh();
+        setTimeout(apply, 260);
+      } else apply();
+    },
+    [world],
+  );
 
   const setWorld = useCallback((w: World | null, s?: string) => {
     setW(w);
@@ -129,15 +150,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     advancing.current = true;
     try {
-      setBusy({ label: world.week === 0 ? 'Pre-season ends' : 'Around the grounds', progress: 0 });
-      await simulateOtherMatches(world, null, (d, t) => setBusy({ label: 'Around the grounds', progress: d / t }));
+      const results: string[] = [];
+      setBusy({ label: world.week === 0 ? 'Pre-season ends' : 'Around the grounds', progress: 0, results });
+      await simulateOtherMatches(
+        world,
+        null,
+        (d, t, f) => {
+          results.push(f.id);
+          setBusy({ label: 'Around the grounds', progress: d / t, results: [...results] });
+        },
+        world.settings.reducedMotion ? 0 : 110,
+      );
+      if (results.length) await new Promise((res) => setTimeout(res, 700));
       const r = finishWeek(world);
       if (r.seasonEnded) {
-        setBusy({ label: 'The season is over', progress: 1 });
+        setBusy({ label: 'The season is over', progress: 1, results: [] });
         await new Promise((res) => setTimeout(res, 30));
+        const managed = world.manager.clubId;
         const summary = endSeason(world);
         setSeasonSummary(summary);
         setScreen('season');
+        if (managed && world.settings.cutscenes !== false) {
+          const div = summary.champions.indexOf(managed);
+          if (div >= 0) setCutscene({ kind: 'trophy', clubId: managed, headline: 'Champions', sub: `${LEAGUE_NAMES[div]} ${summary.season}/${String(summary.season + 1).slice(2)}` });
+          else if (summary.promoted.includes(managed)) setCutscene({ kind: 'trophy', clubId: managed, headline: 'Promoted', sub: `Up to the ${LEAGUE_NAMES[0]}` });
+        }
       } else if (screen === 'report' || screen === 'prematch' || screen === 'match' || screen === 'season') {
         setScreen('home');
       }
@@ -162,6 +199,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       toasts,
       playerId,
       seasonSummary,
+      cutscene,
+      wipe,
+      playCutscene: (c: Cutscene | null) => setCutscene(c && world && world.settings.cutscenes === false ? null : c),
       go,
       mutate,
       setWorld,
@@ -170,7 +210,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       advance,
       save,
     }),
-    [world, slot, screen, params, version, busy, toasts, playerId, seasonSummary, go, mutate, setWorld, toast, advance, save],
+    [world, slot, screen, params, version, busy, toasts, playerId, seasonSummary, cutscene, wipe, go, mutate, setWorld, toast, advance, save],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

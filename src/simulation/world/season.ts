@@ -208,7 +208,7 @@ export function userFixtureThisWeek(world: World): Fixture | undefined {
 }
 
 /** Simulate every unplayed fixture of the current week except the excluded one. */
-export async function simulateOtherMatches(world: World, exceptId: string | null, onProgress?: (done: number, total: number) => void) {
+export async function simulateOtherMatches(world: World, exceptId: string | null, onProgress?: (done: number, total: number, fixture: Fixture) => void, pauseMs = 0) {
   const list = weekFixtures(world).filter((f) => !f.result && f.id !== exceptId);
   let done = 0;
   for (const f of list) {
@@ -216,8 +216,8 @@ export async function simulateOtherMatches(world: World, exceptId: string | null
     m.runToEnd();
     applyResult(world, f, m);
     done++;
-    onProgress?.(done, list.length);
-    await new Promise((r) => setTimeout(r, 0));
+    onProgress?.(done, list.length, f);
+    await new Promise((r) => setTimeout(r, pauseMs));
   }
 }
 

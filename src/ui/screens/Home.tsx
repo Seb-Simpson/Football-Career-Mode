@@ -6,7 +6,7 @@ import { overall, shortName } from '../../domain/player';
 import { LEAGUE_NAMES, MATCHWEEKS, PROMOTION_PLACES } from '../../domain/types';
 import { acceptJob, isWindowOpen, money, objectiveLabel, objectiveTarget, ordinal, userClub } from '../../simulation/world/season';
 import { Form, Panel, ShirtNo, StatusFlags } from '../components/Bits';
-import { Crest } from '../components/Graphics';
+import { Crest, StadiumArt } from '../components/Graphics';
 import { useStore, useWorld } from '../store';
 
 export function Home() {
@@ -33,12 +33,33 @@ function Dashboard() {
 
   return (
     <div className="page">
-      <header className="page-head">
-        <div>
-          <h1>{world.week === 0 ? 'Pre-season' : `Matchweek ${Math.min(world.week, MATCHWEEKS)}`}</h1>
-          <p className="sub">
-            {world.manager.name}, manager of {club.name}. {(table[pos - 1]?.p ?? 0) === 0 ? 'The window is open and the first fixture is a week away.' : `${ordinal(pos)} in the ${LEAGUE_NAMES[club.division]}.`}
+      <header className={`hero ${nf && nf.week === world.week ? 'matchday' : ''}`}>
+        <StadiumArt />
+        <div className="hero-body">
+          <p className="hero-kicker">
+            {club.stadium}, {world.season}/{String(world.season + 1).slice(2)}
           </p>
+          <h1>{nf && nf.week === world.week ? 'Matchday' : world.week === 0 ? 'Pre-season' : `Matchweek ${Math.min(world.week, MATCHWEEKS)}`}</h1>
+          <p className="sub">
+            {world.manager.name}, manager of {club.name}.{' '}
+            {(table[pos - 1]?.p ?? 0) === 0 ? 'The window is open and the first fixture is a week away.' : nf && nf.week === world.week ? `${world.clubs[nf.home === club.id ? nf.away : nf.home].name} ${nf.home === club.id ? 'at home' : 'away'} today.` : ''}
+          </p>
+          {(table[pos - 1]?.p ?? 0) > 0 && (
+            <div className="hero-chips">
+              <span>
+                <b>{ordinal(pos)}</b> {LEAGUE_NAMES[club.division]}
+              </span>
+              <span>
+                <b>{table[pos - 1].pts}</b> points
+              </span>
+              <span>
+                <Form results={table[pos - 1].form} />
+              </span>
+            </div>
+          )}
+        </div>
+        <div className="hero-crest">
+          <Crest club={club} size={148} />
         </div>
       </header>
 
@@ -297,7 +318,13 @@ function Unemployed() {
                 <dt>Best player</dt>
                 <dd>{squad[0] ? `${shortName(squad[0])} (${overall(squad[0])})` : '–'}</dd>
               </dl>
-              <button className="btn" onClick={() => store.mutate((w) => acceptJob(w, c.id), true)}>
+              <button
+                className="btn"
+                onClick={() => {
+                  store.mutate((w) => acceptJob(w, c.id), true);
+                  store.playCutscene({ kind: 'appointed', clubId: c.id });
+                }}
+              >
                 Accept the job
               </button>
             </Panel>

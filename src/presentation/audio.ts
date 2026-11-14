@@ -99,6 +99,32 @@ export class MatchAudio {
     }
   }
 
+  /** Rhythmic terrace clapping: short filtered noise bursts. */
+  claps(bars = 2) {
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const pattern = [0, 0.5, 1, 1.25, 1.5, 2.25, 2.5, 3];
+    for (let b = 0; b < bars; b++) {
+      for (const beat of pattern) {
+        const t = ctx.currentTime + 0.1 + b * 2.2 + beat * 0.55;
+        const len = Math.floor(ctx.sampleRate * 0.09);
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 1500;
+        bp.Q.value = 0.8;
+        const g = ctx.createGain();
+        g.gain.value = 0.5;
+        src.connect(bp).connect(g).connect(this.master);
+        src.start(t);
+      }
+    }
+  }
+
   stop() {
     this.ctx?.close();
     this.ctx = null;

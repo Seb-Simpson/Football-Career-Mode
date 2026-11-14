@@ -1,4 +1,6 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { uiSound } from '../presentation/uiSound';
+import { CutsceneLayer } from './cutscenes/Cutscenes';
 import { LEAGUE_NAMES, MATCHWEEKS } from '../domain/types';
 import { nextFixture } from '../domain/fixtures';
 import { isWindowOpen, userClub, userFixtureThisWeek } from '../simulation/world/season';
@@ -38,6 +40,19 @@ export function App() {
   const store = useStore();
   const { world } = store;
 
+  useEffect(() => {
+    uiSound.setEnabled(world ? world.settings.sound : true);
+  }, [world, store.version]);
+
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.closest('button, [role="tab"], select')) uiSound.click();
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, []);
+
   if (!world) return <Title />;
 
   const club = userClub(world);
@@ -53,7 +68,9 @@ export function App() {
           <Rail />
           <MobileTop />
           <main className="main" id="main">
-            <ScreenView />
+            <div key={`${store.screen}:${store.params.fixture ?? ''}`} className="page-anim">
+              <ScreenView />
+            </div>
           </main>
           <MobileTabs />
         </div>
@@ -61,6 +78,14 @@ export function App() {
       {store.playerId && <PlayerProfile id={store.playerId} onClose={() => store.openPlayer(null)} />}
       <Busy />
       <Toasts />
+      {store.wipe > 0 && (
+        <div key={store.wipe} className="wipe" aria-hidden="true">
+          <i />
+          <i />
+          <span>{club && <Crest club={club} size={120} />}</span>
+        </div>
+      )}
+      <CutsceneLayer />
     </div>
   );
 }
@@ -246,8 +271,12 @@ function MobileTabs() {
 }
 
 function Busy() {
-  const { busy } = useStore();
-  if (!busy) return null;
+  const { busy, world } = useStore();
+  if (!busy || !world) return null;
+  const rows = busy.results
+    .map((id) => world.fixtures.find((f) => f.id === id))
+    .filter((f) => f && f.result)
+    .slice(-10);
   return (
     <div className="busy" role="status" aria-live="polite">
       <div className="box">
@@ -255,7 +284,25 @@ function Busy() {
         <div className="bar">
           <i style={{ width: `${Math.round(busy.progress * 100)}%` }} />
         </div>
-        <p>Simulating the other fixtures with the same match engine you watch.</p>
+        <div className="vidi">
+          {rows.map((f) => {
+            const h = world.clubs[f!.home];
+            const a = world.clubs[f!.away];
+            const r = f!.result!;
+            return (
+              <div key={f!.id} className="vidi-row">
+                <span className="h">{h.name}</span>
+                <Crest club={h} size={22} />
+                <b>
+                  {r.homeGoals}–{r.awayGoals}
+                </b>
+                <Crest club={a} size={22} />
+                <span>{a.name}</span>
+              </div>
+            );
+          })}
+        </div>
+        {rows.length === 0 && <p>Moving the calendar on.</p>}
       </div>
     </div>
   );

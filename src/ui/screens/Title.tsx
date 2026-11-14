@@ -140,6 +140,7 @@ function NewCareer({ onBack }: { onBack: () => void }) {
     const slot = `career-${seed}`;
     saveWorld(world, slot, sel.name);
     store.setWorld(world, slot);
+    store.playCutscene({ kind: 'appointed', clubId: selected });
   };
 
   return (

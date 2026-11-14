@@ -50,9 +50,18 @@ export class PitchRenderer {
   private crowd: HTMLCanvasElement | null = null;
   private trail: [number, number, number][] = [];
   reducedMotion = false;
+  /** Presentation-only controls set by the match screen. */
+  zoom = 1;
+  excite = 0;
+  celebrateTeam: 0 | 1 | -1 = -1;
+  private zoomCur = 1;
+  private focusY = W / 2;
+  private time = 0;
   // projection constants (recomputed on resize)
   private f = 800;
   private cy0 = 0;
+  private fEff = 800;
+  private cyEff = 0;
   private readonly camYPos = -32;
   private readonly camZ = 21;
   private readonly lookY = 30;
@@ -93,8 +102,8 @@ export class PitchRenderer {
     const dz = z - this.camZ;
     const depth = dy * fy + dz * fz;
     const up = dy * uy + dz * uz;
-    const s = this.f / Math.max(1, depth);
-    return [this.w / 2 + dx * s, this.cy0 - up * s, s];
+    const s = this.fEff / Math.max(1, depth);
+    return [this.w / 2 + dx * s, this.cyEff - up * s, s];
   }
 
   private fitCamera() {
@@ -112,6 +121,24 @@ export class PitchRenderer {
     this.f = Math.max(fByHeight, this.w * 1.15);
     // Far touchline (plus boards) near the top.
     this.cy0 = this.h * 0.13 + v(W + 3) * this.f;
+    this.fEff = this.f * this.zoomCur;
+    this.cyEff = this.cy0;
+  }
+
+  /** Smoothly zoom towards the ball while keeping it comfortably in frame. */
+  private updateZoom(ballY: number, dt: number) {
+    const target = this.reducedMotion ? 1 : this.zoom;
+    this.zoomCur += (target - this.zoomCur) * Math.min(1, dt * 2.2);
+    this.focusY += (ballY - this.focusY) * Math.min(1, dt * 2.5);
+    this.fEff = this.f * this.zoomCur;
+    const { fy, fz, uy, uz } = this.basis();
+    const dy = this.focusY - this.camYPos;
+    const dz = -this.camZ;
+    const v = (dy * uy + dz * uz) / (dy * fy + dz * fz);
+    const unzoomed = this.cy0 - v * this.f;
+    const k = Math.max(0, Math.min(1, (this.zoomCur - 1) * 2.5));
+    const want = unzoomed + (this.h * 0.56 - unzoomed) * k;
+    this.cyEff = want + v * this.fEff;
   }
 
   // ---------------------------------------------------------------- render
@@ -140,6 +167,8 @@ export class PitchRenderer {
       this.lastPos[k * 2 + 1] = y;
     }
     const ownerIdx = a.owner;
+    this.time += dt;
+    this.excite = Math.max(0, this.excite - dt * 0.22);
 
     this.trail.push(ball);
     if (this.trail.length > 6) this.trail.shift();
@@ -152,8 +181,9 @@ export class PitchRenderer {
 
   private drawBroadcast(ents: { team: 0 | 1; e: number; x: number; y: number; vx: number; vy: number }[], ball: [number, number, number], owner: number, dt: number, _focus: number | null) {
     const ctx = this.ctx;
+    this.updateZoom(ball[1], dt);
     // Camera: lead the ball, clamp to keep the pitch in frame.
-    const halfView = (this.w / 2) / (this.f / Math.hypot(this.lookY - this.camYPos, this.camZ));
+    const halfView = (this.w / 2) / (this.fEff / Math.hypot(this.lookY - this.camYPos, this.camZ));
     const target = Math.max(halfView - 8, Math.min(L - halfView + 8, ball[0]));
     if (!this.camReady) {
       this.camX = target;
@@ -192,6 +222,7 @@ export class PitchRenderer {
     ctx.fillRect(0, boardTop, this.w, this.h - boardTop);
 
     this.drawLines();
+    this.drawFlags();
     this.drawBoards();
     this.drawGoal(0, true);
     this.drawGoal(L, true);
@@ -344,6 +375,40 @@ export class PitchRenderer {
     ctx.fill();
   }
 
+  private drawFlags() {
+    const ctx = this.ctx;
+    const kit = this.teams.kits[0];
+    for (let i = 0; i < 9; i++) {
+      const x = -4 + i * 14 + (i % 2) * 3;
+      const [bx, by, s] = this.project(x, W + 6.5, 2.2);
+      if (bx < -80 || bx > this.w + 80) continue;
+      const [, ty] = this.project(x, W + 6.5, 7.2);
+      ctx.strokeStyle = 'rgba(230,235,240,0.7)';
+      ctx.lineWidth = Math.max(1, s * 0.07);
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx, ty);
+      ctx.stroke();
+      const fw = s * 3.4;
+      const fh = s * 2.1;
+      const segs = 7;
+      const amp = s * (0.16 + this.excite * 0.2);
+      const speed = this.reducedMotion ? 0 : this.time * (4 + this.excite * 5);
+      const wave = (k: number) => Math.sin(speed + k * 0.9 + i * 1.7) * amp * (k / segs);
+      for (const [color, y0, y1] of [
+        [kit.primary, 0, 1],
+        [kit.secondary, 0.38, 0.62],
+      ] as [string, number, number][]) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        for (let k = 0; k <= segs; k++) ctx.lineTo(bx + (fw * k) / segs, ty + fh * y0 + wave(k));
+        for (let k = segs; k >= 0; k--) ctx.lineTo(bx + (fw * k) / segs, ty + fh * y1 + wave(k));
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
   private drawBoards() {
     const ctx = this.ctx;
     const y = W + 2.6;
@@ -394,13 +459,30 @@ export class PitchRenderer {
       this.crowd = c;
     }
     const c = this.crowd;
+    if (bottom < 4) return;
     const scale = Math.max(0.6, bottom / c.height);
     const tw = c.width * scale;
     const offset = -((this.camX * 6) % tw);
+    const bounce = this.reducedMotion ? 0 : Math.abs(Math.sin(this.time * 9)) * 4 * this.excite;
     ctx.save();
     ctx.globalAlpha = 0.95;
-    for (let x = offset - tw; x < this.w; x += tw) ctx.drawImage(c, x, bottom - c.height * scale, tw, c.height * scale);
+    for (let x = offset - tw; x < this.w; x += tw) ctx.drawImage(c, x, bottom - c.height * scale - bounce, tw, c.height * scale + bounce);
     ctx.restore();
+    // Phone lights and camera flashes in the stand (presentation-only randomness).
+    if (!this.reducedMotion) {
+      const n = 2 + Math.round(this.excite * 46);
+      ctx.fillStyle = '#fff';
+      for (let i = 0; i < n; i++) {
+        const fx = Math.random() * this.w;
+        const fy2 = bottom * (0.25 + Math.random() * 0.72);
+        const r = 0.8 + Math.random() * (1.2 + this.excite * 1.6);
+        ctx.globalAlpha = 0.5 + Math.random() * 0.5;
+        ctx.beginPath();
+        ctx.arc(fx, fy2, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
     // roof shadow
     const g = ctx.createLinearGradient(0, 0, 0, bottom * 0.5);
     g.addColorStop(0, 'rgba(5,9,15,0.85)');
@@ -523,9 +605,14 @@ export class PitchRenderer {
     const hsh = hash(info.id);
     const skin = SKIN[hsh % SKIN.length];
     const hair = HAIR[(hsh >> 3) % HAIR.length];
-    const [fx, fy, s] = this.project(p.x, p.y, 0);
+    const proj = this.project(p.x, p.y, 0);
+    const fx = proj[0];
+    const s = proj[2];
     if (fx < -40 || fx > this.w + 40) return;
     const k = p.team * MAX_PER_TEAM + p.e;
+    const celebrating = p.team === this.celebrateTeam && !info.keeper;
+    const hop = celebrating && !this.reducedMotion ? Math.abs(Math.sin(this.time * 7 + p.e * 1.3)) * s * 0.22 : 0;
+    const fy = proj[1] - hop;
     const speed = Math.hypot(p.vx, p.vy) / 0.2;
     const running = speed > 0.6;
     const ph = this.phase[k];
@@ -576,7 +663,8 @@ export class PitchRenderer {
       ctx.lineWidth = legW * 0.8;
       ctx.beginPath();
       ctx.moveTo(fx + side * s * 0.22, shoulder + s * 0.06);
-      ctx.lineTo(fx + side * s * 0.27 + sw * s * 0.2 * facing, shoulder + s * 0.5);
+      if (celebrating) ctx.lineTo(fx + side * s * 0.36, shoulder - s * 0.42);
+      else ctx.lineTo(fx + side * s * 0.27 + sw * s * 0.2 * facing, shoulder + s * 0.5);
       ctx.stroke();
     }
     // torso

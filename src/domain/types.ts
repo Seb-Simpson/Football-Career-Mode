@@ -192,6 +192,8 @@ export interface Settings {
   playbackMode: 'full' | 'highlights';
   reducedMotion: boolean;
   sound: boolean;
+  /** Cutscenes, walkouts and automatic replays. Undefined means on. */
+  cutscenes?: boolean;
 }
 
 export interface World {

@@ -78,8 +78,8 @@ export function Inbox() {
                     className="btn club"
                     onClick={() => {
                       store.mutate((w) => acceptJob(w, msg.action!.clubId!), true);
-                      store.toast(`You are the new manager of ${world.clubs[msg.action!.clubId!].name}.`);
                       store.go('home');
+                      store.playCutscene({ kind: 'appointed', clubId: msg.action!.clubId! });
                     }}
                   >
                     Accept the job

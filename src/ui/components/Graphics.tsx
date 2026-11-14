@@ -166,3 +166,49 @@ export function TitleBoard() {
     </svg>
   );
 }
+
+/** Floodlit ground at night, used behind the home screen header. */
+export function StadiumArt() {
+  return (
+    <svg className="stadium-art" viewBox="0 0 1200 300" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      <defs>
+        <linearGradient id="sa-sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#0a1322" />
+          <stop offset="1" stopColor="#1b2c49" />
+        </linearGradient>
+        <linearGradient id="sa-beam" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="rgba(255,250,225,0.5)" />
+          <stop offset="1" stopColor="rgba(255,250,225,0)" />
+        </linearGradient>
+        <radialGradient id="sa-glow">
+          <stop offset="0" stopColor="rgba(255,250,225,0.95)" />
+          <stop offset="0.25" stopColor="rgba(255,250,225,0.35)" />
+          <stop offset="1" stopColor="rgba(255,250,225,0)" />
+        </radialGradient>
+        <pattern id="sa-crowd" width="9" height="7" patternUnits="userSpaceOnUse">
+          <rect width="9" height="7" fill="#101a2b" />
+          <circle cx="2" cy="3" r="1.3" fill="var(--club)" opacity="0.75" />
+          <circle cx="6.5" cy="5" r="1.2" fill="#8d97ab" opacity="0.55" />
+          <circle cx="6" cy="1.5" r="1.1" fill="var(--club-2)" opacity="0.5" />
+        </pattern>
+      </defs>
+      <rect width="1200" height="300" fill="url(#sa-sky)" />
+      {[170, 1030].map((x, i) => (
+        <g key={x}>
+          <polygon className={`beam b${i}`} points={`${x - 16},62 ${x + 16},62 ${x + (i ? -330 : 330)},300 ${x + (i ? -80 : 80)},300`} fill="url(#sa-beam)" />
+          <rect x={x - 3} y="60" width="6" height="170" fill="#0a111d" />
+          <rect x={x - 26} y="40" width="52" height="26" fill="#0a111d" />
+          {[-18, -6, 6, 18].map((dx) => (
+            <rect key={dx} x={x + dx - 4} y="46" width="8" height="14" fill="#fffbe6" />
+          ))}
+          <circle className="glow" cx={x} cy="53" r="90" fill="url(#sa-glow)" />
+        </g>
+      ))}
+      <path d="M0 300 V190 Q300 120 600 118 Q900 120 1200 190 V300 Z" fill="url(#sa-crowd)" />
+      <path d="M0 190 Q300 120 600 118 Q900 120 1200 190 L1200 176 Q900 104 600 102 Q300 104 0 176 Z" fill="#070d18" />
+      <rect x="0" y="262" width="1200" height="10" fill="var(--kit-band)" />
+      <rect x="0" y="272" width="1200" height="28" fill="#1d5a3a" />
+      <rect x="0" y="278" width="1200" height="2" fill="rgba(255,255,255,0.7)" />
+    </svg>
+  );
+}

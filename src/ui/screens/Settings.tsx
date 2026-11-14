@@ -131,8 +131,12 @@ export function Settings() {
               Reduce motion (steadier camera, no banner animations)
             </label>
             <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontWeight: 600 }}>
+              <input type="checkbox" checked={s.cutscenes !== false} onChange={(e) => store.mutate((w) => (w.settings.cutscenes = e.target.checked), true)} style={{ width: 20, height: 20 }} />
+              Cutscenes, walkouts and automatic goal replays
+            </label>
+            <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontWeight: 600 }}>
               <input type="checkbox" checked={s.sound} onChange={(e) => store.mutate((w) => (w.settings.sound = e.target.checked), true)} style={{ width: 20, height: 20 }} />
-              Crowd and whistle sound
+              Sound: crowd, whistle and interface
             </label>
           </div>
         </Panel>

@@ -339,10 +339,13 @@ function BidDialog({ id, onClose }: { id: string; onClose: () => void }) {
               className="btn club"
               onClick={() => {
                 let r = { ok: false, message: '' };
+                const from = p.clubId ? world.clubs[p.clubId].name : null;
                 store.mutate((w) => (r = makeBid(w, id, fee, wage)), true);
                 if (r.ok) {
-                  store.toast(r.message);
                   onClose();
+                  store.openPlayer(null);
+                  if (world.settings.cutscenes === false) store.toast(r.message);
+                  else store.playCutscene({ kind: 'signed', playerId: id, fee, from });
                 } else setError(r.message);
               }}
             >

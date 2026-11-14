@@ -4,7 +4,7 @@
 
 A planned football management and career simulation inspired by the depth of **Football Manager** and the broadcast presentation associated with **EA Sports FC**. The ambition is a compelling long-term career with matches that are enjoyable to watch on a phone or laptop.
 
-**Project status:** design stage. At the time this brief was written, this repository contained only a README title. Everything below describes intended behavior, proposed implementation, or release criteria; it is not a claim that these features already exist.
+**Project status:** first playable vertical slice (November 2026). A browser game called **Touchline** now implements the core career loop and a watchable automated match. See [Current build](#current-build) for what exists, how it was verified, and what is still a target. The rest of this README remains the product brief.
 
 **Core interpretation:** the user is the manager. Footballers are controlled by the simulation. You select the team, recruit players, develop talent, set tactics, make substitutions, and watch matches unfold. There are no manual passing, shooting, tackling, or movement controls. A player career and other career perspectives are possible future modes, not the starting scope.
 
@@ -14,6 +14,7 @@ A planned football management and career simulation inspired by the depth of **F
 
 ## Contents
 
+0. [Current build](#current-build)
 1. [Vision and priorities](#vision-and-priorities)
 2. [Scope and delivery strategy](#scope-and-delivery-strategy)
 3. [Career setup and the core loop](#career-setup-and-the-core-loop)
@@ -33,6 +34,47 @@ A planned football management and career simulation inspired by the depth of **F
 17. [Working with Claude and other contributors](#working-with-claude-and-other-contributors)
 18. [Decisions, risks, and often-forgotten details](#decisions-risks-and-often-forgotten-details)
 19. [Running the project and contributing](#running-the-project-and-contributing)
+
+## Current build
+
+**Touchline** is a TypeScript + React + Vite single-page app with no server. Everything below has working UI and domain behaviour, and is covered by the automated checks listed. Items not listed here are still targets from the brief.
+
+| Area | Implemented | Evidence |
+| --- | --- | --- |
+| World | 20 fictional clubs in two 10-team divisions (Crown League, Crown League Two), generated players, nations, kits and crests | `tests/domain.test.ts` |
+| Competitions | Double round-robin fixtures, ordered tiebreakers (points, GD, GF, head-to-head, name), two up and two down, season rollover | `tests/domain.test.ts`, `tests/career.test.ts` (full-season soak) |
+| Match engine | Deterministic spatial simulation (fixed 0.2s step, seeded RNG): positioning, pressing, marking, passing, dribbling, tackles, fouls, cards, offside, corners, throw-ins, goal kicks, free kicks, penalties, stoppage time, fatigue, injuries, substitutions, tactical changes | `tests/match.test.ts` (determinism, command replay, score/event/stat consistency, seeded regression batch) |
+| Watching | Broadcast camera (perspective projection on Canvas 2D: stands, ad boards, nets, animated players), top-down tactical view, full match / key highlights / instant result, 0.5–4× speed, goal replays, procedural crowd and whistle audio | Manual browser checks (Playwright screenshots at 1440×900 and iPhone 13) |
+| Touchline control | Substitutions that wait for a stoppage (5 maximum), formation and instruction changes mid-match, assistant replaces injured players | `tests/match.test.ts` |
+| Management | Club choice with difficulty, squad selection by tap (no dragging), assistant pick with explanations, lineup validation, tactics with trade-off text and presets, training focus, player profiles | Manual browser checks |
+| Market | Scouting (one-week reports, estimates before then), bids, wage demands, budgets, free agents, release, renewals, transfer list with AI bids, AI recruitment in windows | `tests/career.test.ts` (atomic transfer) |
+| Club | Ledger (gate, broadcast, sponsorship, prize money, wages, running costs), board objective and confidence, dismissal and job offers | Full-season soak |
+| Development | Weekly and off-season attribute growth/decline, ageing, retirement, youth intake, contract expiry | Full-season soak |
+| Saves | Local saves with temp-write and backup copy, validated import/export, version check | `tests/career.test.ts` |
+| Layout | Laptop side rail; phone top bar, bottom tabs, sheets, floating Continue; no horizontal page scroll at 390px | Playwright overflow check |
+
+### Engine calibration (seeded batch, 90 matches)
+
+Measured with `npm run calibrate` on the current engine (version 1.0.0):
+
+| Metric | Result | Typical real-world reference |
+| --- | --- | --- |
+| Goals per match | 2.64 | 2.5–2.9 |
+| Home / draw / away | 46% / 22% / 32% | ~45 / 25 / 30 |
+| Shots per team | 17.4 | 12–14 |
+| On target per team | 5.8 | 4–5 |
+| Fouls per team | 8.7 | 10–12 |
+| Pass accuracy | 68% | 75–85% |
+| Stronger side wins decisive games | 63% | — |
+
+Known gaps: corners (~2.5 per team) and offsides (~0.1 per team) are low, shot volume is high and pass accuracy is low. Shot conversion uses a location-based model discounted for game pressure; it is not shown to players as xG.
+
+### Known limitations
+
+- No cup competition, loans, staff, set-piece routines or 3D renderer yet. The broadcast view is a 2.5D canvas projection, the agreed stepping stone toward milestone 2.
+- Background matches use the same engine as the watched match, at roughly 0.25–0.4s each, so a matchday takes about 2 seconds with a progress overlay. Moving this into a Web Worker is the next performance step.
+- Saves use `localStorage` rather than IndexedDB; a career is about 0.5 MB. Multi-tab conflict detection is not implemented.
+- Real-device performance, screen-reader passes and long multi-season soaks have not been done.
 
 ## Vision and priorities
 
@@ -72,7 +114,7 @@ Use these labels throughout development:
 | Later target | Valuable expansion after the core experience is dependable. |
 | Proposed default | A practical starting decision that can change when measured evidence supports it. |
 
-**No gameplay features are currently marked implemented by this README.**
+Implemented features and their evidence are listed in [Current build](#current-build).
 
 ### First complete career release: core targets
 
@@ -400,7 +442,7 @@ An application update must not silently replace a running engine mid-match. Expl
 
 ## Technical direction
 
-**No stack or build commands have been implemented yet.** The following is a proposed starting architecture to validate with prototypes.
+The current build follows this direction with TypeScript, React and Vite. The broadcast view is a Canvas 2D perspective renderer for now (no Three.js yet), and the simulation runs on the main thread.
 
 ### Suggested stack
 
@@ -564,15 +606,37 @@ Use fictional clubs, badges, kits, competitions, people, and original audio unle
 
 ## Running the project and contributing
 
-There is no playable build, package manifest, or verified installation command in this repository at the time this brief was authored. Do not run invented setup commands from this README.
+Requirements: Node.js 20 or newer and npm. These commands have been run and verified:
 
-When the application is scaffolded, add and verify:
+```bash
+npm install
+npm run dev        # development server (Vite)
+npm test           # unit, engine and full-season tests (~2 minutes)
+npm run build      # typecheck and production build into dist/
+npm run preview    # serve the production build locally
+npm run calibrate  # 90-match engine statistics batch (~40 seconds)
+```
 
-- Runtime/package-manager requirements and exact install, development, test, and production-build commands.
-- A real deployment URL, supported browser/device matrix, and offline capabilities that have actually been tested.
-- Screenshots or video from the running game, with dates/version context.
-- Feature status, known issues, save compatibility policy, release notes, and benchmark results.
-- Contribution instructions, repository license, asset/data credits, and issue templates.
+The build is static (`base: './'`), so `dist/` can be hosted on any static host. No deployment exists yet.
+
+Source layout:
+
+```text
+src/
+  domain/          # Types, formations, player ratings/valuation, fixtures, table, lineups, world generation
+  simulation/
+    match/         # Deterministic match engine and team setup
+    world/         # Matchdays, weekly cycle, finances, transfers, board, season rollover
+  presentation/    # Canvas renderer (broadcast + tactical), commentary, procedural audio
+  persistence/     # Save, load, validation, export/import
+  ui/              # React screens, components, theme (club colours drive the chrome)
+  data/            # Fictional name and club definitions
+  shared/          # Seeded RNG
+tests/             # Domain, engine and career tests
+scripts/           # Engine calibration batch
+```
+
+Still to add: a repository licence, asset credits (currently none: all graphics are generated in code, fonts are OFL via Fontsource), issue templates and a release process.
 
 A useful bug report includes the game version, device/browser, reproduction steps, expected and actual behavior, and a seed/save only when the reporter chooses to share it. Remove personal information from shared files.
 
